@@ -3,7 +3,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore, Gasto, Receita, Categoria, Budget } from '@/lib/store'
 import { formatBRL, CATEGORIAS } from '@/lib/utils'
 import { cn } from '@/lib/utils'
-import { Plus, Trash2, CheckCircle, Circle, Pencil, Check, X, FileText, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, CheckCircle, Circle, Pencil, Check, X, FileText, TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Target } from 'lucide-react'
 import { format, addMonths, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -154,6 +154,16 @@ export default function Financas() {
             </button>
           ))}
         </div>
+
+        {/* Budget tracker inline */}
+        <CategoryBudgetInline
+          cat={catAtiva}
+          total={totalCat(catAtiva)}
+          totalReceitas={totalReceitas}
+          budget={budgets[catAtiva]}
+          onSetBudget={(b) => setBudget(catAtiva, b)}
+          onRemoveBudget={() => removeBudget(catAtiva)}
+        />
 
         <div className="space-y-2">
           {gastosPorCat(catAtiva).map((g) => (
@@ -472,6 +482,121 @@ function GastoItem({ gasto, mesAtivo, isPago, onToggle, onRemove, onUpdate }: {
       <button onClick={() => onRemove(gasto.id)} className="shrink-0 text-slate-600 hover:text-red-400 active:text-red-400 transition-colors p-1">
         <Trash2 size={15} />
       </button>
+    </div>
+  )
+}
+
+// ─── CategoryBudgetInline ─────────────────────────────────────────────────────
+// Shown at the top of the gastos list when a category is active
+
+function CategoryBudgetInline({ cat, total, totalReceitas, budget, onSetBudget, onRemoveBudget }: {
+  cat: string; total: number; totalReceitas: number
+  budget: Budget | undefined
+  onSetBudget: (b: Budget) => void; onRemoveBudget: () => void
+}) {
+  const [editando, setEditando] = useState(false)
+  const [tipo, setTipo] = useState<'fixo' | 'percentual'>(budget?.tipo ?? 'percentual')
+  const [valor, setValor] = useState(budget ? String(budget.valor) : '')
+
+  useEffect(() => {
+    setTipo(budget?.tipo ?? 'percentual')
+    setValor(budget ? String(budget.valor) : '')
+    setEditando(false)
+  }, [cat, budget])
+
+  function salvar() {
+    const v = parseFloat(valor.replace(',', '.'))
+    if (isNaN(v) || v <= 0) return
+    onSetBudget({ tipo, valor: v })
+    setEditando(false)
+  }
+
+  const budgetValor = budget
+    ? budget.tipo === 'percentual' ? (totalReceitas * budget.valor) / 100 : budget.valor
+    : null
+
+  if (editando) {
+    return (
+      <div className="mb-3 bg-slate-900 border border-indigo-500/40 rounded-xl px-4 py-3 space-y-2">
+        <p className="text-xs text-indigo-300 font-medium flex items-center gap-1.5"><Target size={12} /> Definir limite de orçamento</p>
+        <div className="flex gap-2">
+          <button onClick={() => setTipo('percentual')} className={cn('flex-1 text-xs py-1.5 rounded-lg border transition-colors', tipo === 'percentual' ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'border-slate-700 text-slate-500')}>% da renda</button>
+          <button onClick={() => setTipo('fixo')} className={cn('flex-1 text-xs py-1.5 rounded-lg border transition-colors', tipo === 'fixo' ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'border-slate-700 text-slate-500')}>Valor fixo</button>
+        </div>
+        <div className="flex gap-2 items-center">
+          <input
+            value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            inputMode="decimal"
+            placeholder={tipo === 'percentual' ? 'ex: 3 (= 3% da renda)' : 'ex: 150,00'}
+            className="flex-1 bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-indigo-500"
+          />
+          {tipo === 'percentual' && totalReceitas > 0 && (
+            <span className="text-xs text-slate-500 shrink-0">= {formatBRL((totalReceitas * (parseFloat(valor.replace(',', '.')) || 0)) / 100)}</span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={salvar} className="flex-1 bg-indigo-600 text-white text-xs py-1.5 rounded-lg">Salvar</button>
+          {budget && <button onClick={() => { onRemoveBudget(); setEditando(false) }} className="px-3 bg-slate-800 text-red-400 text-xs py-1.5 rounded-lg">Remover</button>}
+          <button onClick={() => setEditando(false)} className="flex-1 bg-slate-800 text-slate-400 text-xs py-1.5 rounded-lg">Cancelar</button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!budget || budgetValor === null) {
+    return (
+      <button
+        onClick={() => setEditando(true)}
+        className="mb-3 w-full flex items-center justify-center gap-2 border border-dashed border-slate-700 text-slate-600 text-xs py-2 rounded-xl hover:border-indigo-500/50 hover:text-indigo-400 transition-colors"
+      >
+        <Target size={12} /> Definir limite de orçamento
+      </button>
+    )
+  }
+
+  const pct = Math.min((total / budgetValor) * 100, 100)
+  const overBudget = total > budgetValor
+  const nearBudget = pct >= 75 && !overBudget
+  const barColor = overBudget ? 'bg-red-500' : nearBudget ? 'bg-amber-400' : 'bg-emerald-500'
+  const bgCard = overBudget ? 'border-red-500/30 bg-red-950/20' : nearBudget ? 'border-amber-500/20 bg-amber-950/10' : 'border-slate-800'
+
+  return (
+    <div className={cn('mb-3 rounded-xl border px-4 py-3', bgCard)}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5">
+          {overBudget
+            ? <AlertTriangle size={13} className="text-red-400" />
+            : <Target size={13} className="text-slate-500" />}
+          <span className="text-xs text-slate-400">Orçamento mensal</span>
+        </div>
+        <button onClick={() => setEditando(true)} className="text-slate-600 hover:text-indigo-400 transition-colors"><Pencil size={11} /></button>
+      </div>
+
+      {/* Barra grande */}
+      <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
+        <div
+          className={cn('h-3 rounded-full transition-all duration-500', barColor)}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      {/* Valores */}
+      <div className="flex justify-between items-baseline mt-1.5">
+        <span className={cn('text-sm font-bold', overBudget ? 'text-red-400' : nearBudget ? 'text-amber-400' : 'text-slate-200')}>
+          {formatBRL(total)}
+        </span>
+        <span className="text-xs text-slate-500">
+          de {formatBRL(budgetValor)}
+          {budget.tipo === 'percentual' && <span className="text-slate-600"> ({budget.valor}%)</span>}
+        </span>
+      </div>
+
+      {overBudget ? (
+        <p className="text-xs text-red-400 mt-1">Ultrapassou em {formatBRL(total - budgetValor)}</p>
+      ) : (
+        <p className="text-xs text-slate-600 mt-1">Restam {formatBRL(budgetValor - total)} · {pct.toFixed(0)}% utilizado</p>
+      )}
     </div>
   )
 }
