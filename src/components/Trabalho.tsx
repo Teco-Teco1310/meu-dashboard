@@ -59,7 +59,7 @@ export default function Trabalho() {
 // ─── Calendário ───────────────────────────────────────────────────────────────
 
 function Calendario() {
-  const { tarefas, addTarefa, removeTarefa, toggleConcluida } = useStore()
+  const { tarefas, addTarefa, removeTarefa, toggleConcluida, updateTarefa } = useStore()
   const [mes, setMes] = useState(new Date())
   const [diaAtivo, setDiaAtivo] = useState(new Date())
   const [mostraForm, setMostraForm] = useState(false)
@@ -92,7 +92,7 @@ function Calendario() {
         </div>
         {tarefas.length === 0 && <p className="text-xs text-slate-600 text-center py-10">Nenhuma tarefa cadastrada</p>}
         {[...tarefas].sort((a, b) => a.data > b.data ? 1 : -1).map((t) => (
-          <TarefaItem key={t.id} tarefa={t} onToggle={toggleConcluida} onRemove={removeTarefa} showDate />
+          <TarefaItem key={t.id} tarefa={t} onToggle={toggleConcluida} onRemove={removeTarefa} onUpdate={updateTarefa} showDate />
         ))}
       </section>
     )
@@ -191,7 +191,7 @@ function Calendario() {
             <p className="text-xs text-slate-600 text-center py-6">Nenhuma tarefa para este dia</p>
           )}
           {[...tarefasDoDia].sort((a, b) => (a.hora ?? '99:99') > (b.hora ?? '99:99') ? 1 : -1)
-            .map((t) => <TarefaItem key={t.id} tarefa={t} onToggle={toggleConcluida} onRemove={removeTarefa} />)}
+            .map((t) => <TarefaItem key={t.id} tarefa={t} onToggle={toggleConcluida} onRemove={removeTarefa} onUpdate={updateTarefa} />)}
         </div>
       </section>
     </>
@@ -477,10 +477,49 @@ function NotaEditor({ nota, onUpdate, onClose, onDelete }: {
 
 // ─── TarefaItem ───────────────────────────────────────────────────────────────
 
-function TarefaItem({ tarefa, onToggle, onRemove, showDate }: {
-  tarefa: Tarefa; onToggle: (id: string) => void; onRemove: (id: string) => void; showDate?: boolean
+function TarefaItem({ tarefa, onToggle, onRemove, onUpdate, showDate }: {
+  tarefa: Tarefa; onToggle: (id: string) => void; onRemove: (id: string) => void
+  onUpdate: (id: string, t: Partial<Tarefa>) => void; showDate?: boolean
 }) {
-  const tipo = TIPO_TAREFA[tarefa.tipo]
+  const [editando, setEditando] = useState(false)
+  const [titulo, setTitulo] = useState(tarefa.titulo)
+  const [descricao, setDescricao] = useState(tarefa.descricao ?? '')
+  const [hora, setHora] = useState(tarefa.hora ?? '')
+  const [tipo, setTipo] = useState<Tarefa['tipo']>(tarefa.tipo)
+
+  const salvar = () => {
+    onUpdate(tarefa.id, { titulo: titulo.trim() || tarefa.titulo, descricao: descricao.trim() || undefined, hora: hora || undefined, tipo })
+    setEditando(false)
+  }
+
+  const cancelar = () => {
+    setTitulo(tarefa.titulo); setDescricao(tarefa.descricao ?? ''); setHora(tarefa.hora ?? ''); setTipo(tarefa.tipo)
+    setEditando(false)
+  }
+
+  const tipoInfo = TIPO_TAREFA[tarefa.tipo]
+
+  if (editando) {
+    return (
+      <div className="bg-slate-900 rounded-xl px-4 py-3 border border-indigo-600 space-y-2">
+        <input value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="Título" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 outline-none border border-slate-700 focus:border-indigo-500" />
+        <input value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="Descrição (opcional)" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 outline-none border border-slate-700 focus:border-indigo-500" />
+        <div className="flex gap-2">
+          <input type="time" value={hora} onChange={e => setHora(e.target.value)} className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 outline-none border border-slate-700 focus:border-indigo-500" />
+          <select value={tipo} onChange={e => setTipo(e.target.value as Tarefa['tipo'])} className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 outline-none border border-slate-700 focus:border-indigo-500">
+            <option value="tarefa">Tarefa</option>
+            <option value="reuniao">Reunião</option>
+            <option value="prazo">Prazo</option>
+          </select>
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={salvar} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg py-1.5 transition-colors">Salvar</button>
+          <button onClick={cancelar} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium rounded-lg py-1.5 transition-colors">Cancelar</button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={cn('flex items-start gap-3 bg-slate-900 rounded-xl px-4 py-3 border border-slate-800', tarefa.concluida && 'opacity-50')}>
       <button onClick={() => onToggle(tarefa.id)} className="shrink-0 mt-0.5">
@@ -490,12 +529,15 @@ function TarefaItem({ tarefa, onToggle, onRemove, showDate }: {
         <p className={cn('text-sm', tarefa.concluida ? 'line-through text-slate-500' : 'text-slate-200')}>{tarefa.titulo}</p>
         {tarefa.descricao && <p className="text-xs text-slate-500 mt-0.5">{tarefa.descricao}</p>}
         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <span className={cn('text-xs px-2 py-0.5 rounded-full border', tipo.bg, tipo.cor)}>{tipo.label}</span>
+          <span className={cn('text-xs px-2 py-0.5 rounded-full border', tipoInfo.bg, tipoInfo.cor)}>{tipoInfo.label}</span>
           {tarefa.hora && <span className="text-xs text-slate-500 flex items-center gap-1"><Clock size={11} />{tarefa.hora}</span>}
           {showDate && <span className="text-xs text-slate-500 flex items-center gap-1"><Calendar size={11} />{format(parseISO(tarefa.data), "d MMM", { locale: ptBR })}</span>}
         </div>
       </div>
-      <button onClick={() => onRemove(tarefa.id)} className="shrink-0 text-slate-700 hover:text-red-400 transition-colors">
+      <button onClick={() => setEditando(true)} className="shrink-0 text-slate-500 hover:text-indigo-400 active:text-indigo-400 transition-colors">
+        <Pencil size={15} />
+      </button>
+      <button onClick={() => onRemove(tarefa.id)} className="shrink-0 text-slate-700 hover:text-red-400 active:text-red-400 transition-colors">
         <Trash2 size={15} />
       </button>
     </div>
