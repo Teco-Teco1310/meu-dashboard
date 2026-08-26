@@ -5,41 +5,50 @@ import Trabalho from '@/components/Trabalho'
 import Login from '@/components/Login'
 import { BarChart2, Briefcase, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { isAuthenticated, logout } from '@/lib/auth'
+import { isAuthenticated, logout, getUsername } from '@/lib/auth'
+import { useStore } from '@/lib/store'
 
 type Modulo = 'financas' | 'trabalho'
 
 export default function Home() {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [modulo, setModulo] = useState<Modulo>('financas')
+  const { seeded, seedJaozincosta } = useStore()
 
   useEffect(() => {
     setAuthed(isAuthenticated())
   }, [])
 
+  // Seed default data for jaozincosta on first login
+  useEffect(() => {
+    if (authed && getUsername() === 'jaozincosta' && !seeded) {
+      seedJaozincosta()
+    }
+  }, [authed, seeded, seedJaozincosta])
+
   if (authed === null) return null
 
   if (!authed) {
-    return <Login onSuccess={() => setAuthed(true)} />
+    // Reload after login so store reinitializes with the correct user-specific storage key
+    return <Login onSuccess={() => window.location.reload()} />
   }
 
   function handleLogout() {
     logout()
-    setAuthed(false)
+    window.location.reload()
   }
+
+  const username = getUsername()
 
   return (
     <div className="flex flex-col min-h-screen max-w-2xl mx-auto">
       {/* Header */}
       <header className="sticky top-0 z-50 bg-slate-950/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-sm font-semibold text-slate-400 tracking-widest uppercase">
-          Dashboard
-        </h1>
-        <button
-          onClick={handleLogout}
-          className="text-slate-600 hover:text-slate-400 transition-colors"
-          title="Sair"
-        >
+        <div>
+          <h1 className="text-sm font-semibold text-slate-400 tracking-widest uppercase">Dashboard</h1>
+          {username && <p className="text-[10px] text-slate-600 mt-0.5">@{username}</p>}
+        </div>
+        <button onClick={handleLogout} className="text-slate-600 hover:text-slate-400 transition-colors" title="Sair">
           <LogOut size={16} />
         </button>
       </header>

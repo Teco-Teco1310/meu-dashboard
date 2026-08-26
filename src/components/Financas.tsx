@@ -46,12 +46,19 @@ export default function Financas() {
     if (btn) btn.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
   }, [mesAtivo])
 
+  // Valor efetivo de um gasto/receita no mês ativo (usa override se existir)
+  const getValorGasto = (g: Gasto) => g.valorMeses?.[mesAtivo] ?? g.valor
+  const getValorReceita = (r: Receita) => r.valorMeses?.[mesAtivo] ?? r.valor
+
   // Gastos visíveis no mês ativo
   const gastosVisiveis = gastos.filter((g) => g.recorrente || g.mes === mesAtivo)
   const gastosPorCat = (cat: Categoria) => gastosVisiveis.filter((g) => g.categoria === cat)
-  const totalCat = (cat: Categoria) => gastosPorCat(cat).reduce((a, g) => a + g.valor, 0)
-  const totalGastos = gastosVisiveis.reduce((a, g) => a + g.valor, 0)
-  const totalReceitas = receitas.reduce((a, r) => a + r.valor, 0)
+  const totalCat = (cat: Categoria) => gastosPorCat(cat).reduce((a, g) => a + getValorGasto(g), 0)
+  const totalGastos = gastosVisiveis.reduce((a, g) => a + getValorGasto(g), 0)
+
+  // Receitas visíveis no mês ativo
+  const receitasVisiveis = receitas.filter((r) => (r.recorrente ?? true) || r.mes === mesAtivo)
+  const totalReceitas = receitasVisiveis.reduce((a, r) => a + getValorReceita(r), 0)
   const saldo = totalReceitas - totalGastos
 
   const isPago = (g: Gasto) => g.recorrente ? (g.pagoMeses[mesAtivo] ?? false) : g.pago
@@ -67,6 +74,7 @@ export default function Financas() {
     addGasto({
       descricao: form.descricao,
       valor: parseFloat(form.valor.replace(',', '.')),
+      valorMeses: {},
       categoria: catAtiva,
       vencimento: form.vencimento || undefined,
       recorrente: form.recorrente,
@@ -105,8 +113,8 @@ export default function Financas() {
       {/* Resumo */}
       <div className="grid grid-cols-3 gap-3">
         <SummaryCard label="Receitas" valor={totalReceitas} cor="text-green-400" />
-        <SummaryCard label="Gastos" valor={totalGastos} cor="text-red-400" />
-        <SummaryCard label="Saldo" valor={saldo} cor={saldo >= 0 ? 'text-indigo-400' : 'text-red-400'} />
+        <SummaryCard label="Gastos"   valor={totalGastos}   cor="text-red-400" />
+        <SummaryCard label="Saldo"    valor={saldo}         cor={saldo >= 0 ? 'text-indigo-400' : 'text-red-400'} />
       </div>
 
       {/* Botão relatório */}
@@ -121,8 +129,10 @@ export default function Financas() {
       <section>
         <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Receitas</h2>
         <div className="space-y-2">
-          {receitas.map((r) => <ReceitaItem key={r.id} receita={r} onUpdate={updateReceita} onRemove={removeReceita} />)}
-          <AddReceita onAdd={addReceita} />
+          {receitasVisiveis.map((r) => (
+            <ReceitaItem key={r.id} receita={r} mesAtivo={mesAtivo} onUpdate={updateReceita} onRemove={removeReceita} />
+          ))}
+          <AddReceita onAdd={addReceita} mesAtivo={mesAtivo} meses={meses} />
         </div>
       </section>
 
@@ -147,7 +157,7 @@ export default function Financas() {
 
         <div className="space-y-2">
           {gastosPorCat(catAtiva).map((g) => (
-            <GastoItem key={g.id} gasto={g} isPago={isPago(g)} onToggle={handleTogglePago} onRemove={removeGasto} onUpdate={updateGasto} />
+            <GastoItem key={g.id} gasto={g} mesAtivo={mesAtivo} isPago={isPago(g)} onToggle={handleTogglePago} onRemove={removeGasto} onUpdate={updateGasto} />
           ))}
           {gastosPorCat(catAtiva).length === 0 && (
             <p className="text-xs text-slate-600 text-center py-4">
@@ -260,29 +270,47 @@ function SummaryCard({ label, valor, cor }: { label: string; valor: number; cor:
   )
 }
 
-function ReceitaItem({ receita, onUpdate, onRemove }: {
-  receita: Receita; onUpdate: (id: string, r: Partial<Receita>) => void; onRemove: (id: string) => void
+function ReceitaItem({ receita, mesAtivo, onUpdate, onRemove }: {
+  receita: Receita; mesAtivo: string
+  onUpdate: (id: string, r: Partial<Receita>) => void; onRemove: (id: string) => void
 }) {
+  const valorEfetivo = receita.valorMeses?.[mesAtivo] ?? receita.valor
   const [editando, setEditando] = useState(false)
   const [desc, setDesc] = useState(receita.descricao)
-  const [valor, setValor] = useState(String(receita.valor))
+  const [valor, setValor] = useState(String(valorEfetivo))
   const [dia, setDia] = useState(String(receita.diaRecebimento))
+
+  // Sync valor when mesAtivo changes
+  useEffect(() => {
+    setValor(String(receita.valorMeses?.[mesAtivo] ?? receita.valor))
+  }, [mesAtivo, receita])
 
   function salvar() {
     const v = parseFloat(valor.replace(',', '.'))
     if (!desc || isNaN(v)) return
-    onUpdate(receita.id, { descricao: desc, valor: v, diaRecebimento: parseInt(dia) || receita.diaRecebimento })
+    // Save value as override for this month only
+    onUpdate(receita.id, {
+      descricao: desc,
+      diaRecebimento: parseInt(dia) || receita.diaRecebimento,
+      valorMeses: { ...(receita.valorMeses ?? {}), [mesAtivo]: v },
+    })
     setEditando(false)
   }
-  function cancelar() { setDesc(receita.descricao); setValor(String(receita.valor)); setDia(String(receita.diaRecebimento)); setEditando(false) }
+  function cancelar() {
+    setDesc(receita.descricao)
+    setValor(String(receita.valorMeses?.[mesAtivo] ?? receita.valor))
+    setDia(String(receita.diaRecebimento))
+    setEditando(false)
+  }
 
   if (editando) return (
     <div className="bg-slate-900 border border-indigo-500/50 rounded-xl px-4 py-3 space-y-2">
       <input value={desc} onChange={(e) => setDesc(e.target.value)} className="w-full bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-indigo-500" />
       <div className="grid grid-cols-2 gap-2">
-        <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none" />
+        <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" placeholder="Valor neste mês" className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none" />
         <input value={dia} onChange={(e) => setDia(e.target.value)} inputMode="numeric" maxLength={2} placeholder="Dia" className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none" />
       </div>
+      <p className="text-[10px] text-slate-600">Editar valor afeta apenas este mês</p>
       <div className="flex gap-2">
         <button onClick={salvar} className="flex-1 flex items-center justify-center gap-1 bg-indigo-600 text-white text-xs py-1.5 rounded-lg"><Check size={12} /> Salvar</button>
         <button onClick={cancelar} className="flex-1 flex items-center justify-center gap-1 bg-slate-800 text-slate-400 text-xs py-1.5 rounded-lg"><X size={12} /> Cancelar</button>
@@ -290,31 +318,45 @@ function ReceitaItem({ receita, onUpdate, onRemove }: {
     </div>
   )
 
+  const temOverride = receita.valorMeses?.[mesAtivo] !== undefined
+
   return (
     <div className="flex items-center justify-between bg-slate-900 rounded-xl px-4 py-3 border border-slate-800">
       <span className="text-sm text-slate-200">{receita.descricao}</span>
       <div className="flex items-center gap-3">
         <div className="text-right">
-          <p className="text-sm font-semibold text-green-400">{formatBRL(receita.valor)}</p>
-          <p className="text-xs text-slate-500">dia {receita.diaRecebimento}</p>
+          <p className="text-sm font-semibold text-green-400">{formatBRL(valorEfetivo)}</p>
+          <p className="text-xs text-slate-500">{temOverride ? 'este mês' : `dia ${receita.diaRecebimento}`}</p>
         </div>
-        <button onClick={() => setEditando(true)} className="text-slate-500 hover:text-indigo-400 transition-colors"><Pencil size={14} /></button>
-        <button onClick={() => onRemove(receita.id)} className="text-slate-600 hover:text-red-400 transition-colors"><Trash2 size={14} /></button>
+        <button onClick={() => setEditando(true)} className="text-slate-500 hover:text-indigo-400 active:text-indigo-400 transition-colors"><Pencil size={14} /></button>
+        <button onClick={() => onRemove(receita.id)} className="text-slate-600 hover:text-red-400 active:text-red-400 transition-colors"><Trash2 size={14} /></button>
       </div>
     </div>
   )
 }
 
-function AddReceita({ onAdd }: { onAdd: (r: Omit<Receita, 'id'>) => void }) {
+function AddReceita({ onAdd, mesAtivo, meses }: {
+  onAdd: (r: Omit<Receita, 'id'>) => void
+  mesAtivo: string
+  meses: { key: string; label: string }[]
+}) {
   const [aberto, setAberto] = useState(false)
   const [desc, setDesc] = useState('')
   const [valor, setValor] = useState('')
   const [dia, setDia] = useState('')
+  const [recorrente, setRecorrente] = useState(true)
 
   function salvar() {
     const v = parseFloat(valor.replace(',', '.'))
     if (!desc || isNaN(v)) return
-    onAdd({ descricao: desc, valor: v, diaRecebimento: parseInt(dia) || 1 })
+    onAdd({
+      descricao: desc,
+      valor: v,
+      valorMeses: {},
+      diaRecebimento: parseInt(dia) || 1,
+      recorrente,
+      mes: recorrente ? undefined : mesAtivo,
+    })
     setDesc(''); setValor(''); setDia(''); setAberto(false)
   }
 
@@ -331,6 +373,13 @@ function AddReceita({ onAdd }: { onAdd: (r: Omit<Receita, 'id'>) => void }) {
         <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" placeholder="Valor" className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none" />
         <input value={dia} onChange={(e) => setDia(e.target.value)} inputMode="numeric" maxLength={2} placeholder="Dia receb." className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none" />
       </div>
+      <button
+        onClick={() => setRecorrente((r) => !r)}
+        className={cn('w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-colors', recorrente ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'border-slate-700 text-slate-500')}
+      >
+        <RefreshCw size={12} />
+        {recorrente ? 'Recorrente — aparece em todos os meses' : 'Único — apenas em ' + (meses.find(m => m.key === mesAtivo)?.label ?? mesAtivo)}
+      </button>
       <div className="flex gap-2">
         <button onClick={salvar} className="flex-1 bg-green-700 text-white text-xs py-1.5 rounded-lg">Salvar</button>
         <button onClick={() => setAberto(false)} className="flex-1 bg-slate-800 text-slate-400 text-xs py-1.5 rounded-lg">Cancelar</button>
@@ -339,36 +388,54 @@ function AddReceita({ onAdd }: { onAdd: (r: Omit<Receita, 'id'>) => void }) {
   )
 }
 
-function GastoItem({ gasto, isPago, onToggle, onRemove, onUpdate }: {
-  gasto: Gasto; isPago: boolean
+function GastoItem({ gasto, mesAtivo, isPago, onToggle, onRemove, onUpdate }: {
+  gasto: Gasto; mesAtivo: string; isPago: boolean
   onToggle: (id: string) => void; onRemove: (id: string) => void; onUpdate: (id: string, g: Partial<Gasto>) => void
 }) {
+  const valorEfetivo = gasto.valorMeses?.[mesAtivo] ?? gasto.valor
   const [editando, setEditando] = useState(false)
   const [desc, setDesc] = useState(gasto.descricao)
-  const [valor, setValor] = useState(String(gasto.valor))
+  const [valor, setValor] = useState(String(valorEfetivo))
   const [venc, setVenc] = useState(gasto.vencimento ?? '')
+
+  useEffect(() => {
+    setValor(String(gasto.valorMeses?.[mesAtivo] ?? gasto.valor))
+  }, [mesAtivo, gasto])
 
   function salvar() {
     const v = parseFloat(valor.replace(',', '.'))
     if (!desc || isNaN(v)) return
-    onUpdate(gasto.id, { descricao: desc, valor: v, vencimento: venc || undefined })
+    // Save value as override for this month only; don't touch base valor
+    onUpdate(gasto.id, {
+      descricao: desc,
+      vencimento: venc || undefined,
+      valorMeses: { ...(gasto.valorMeses ?? {}), [mesAtivo]: v },
+    })
     setEditando(false)
   }
-  function cancelar() { setDesc(gasto.descricao); setValor(String(gasto.valor)); setVenc(gasto.vencimento ?? ''); setEditando(false) }
+  function cancelar() {
+    setDesc(gasto.descricao)
+    setValor(String(gasto.valorMeses?.[mesAtivo] ?? gasto.valor))
+    setVenc(gasto.vencimento ?? '')
+    setEditando(false)
+  }
 
   if (editando) return (
     <div className="bg-slate-900 border border-indigo-500/50 rounded-xl px-4 py-3 space-y-2">
       <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Descrição" className="w-full bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-indigo-500" />
       <div className="grid grid-cols-2 gap-2">
-        <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" placeholder="Valor" className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-indigo-500" />
+        <input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" placeholder="Valor neste mês" className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-indigo-500" />
         <input value={venc} onChange={(e) => setVenc(e.target.value)} inputMode="numeric" maxLength={2} placeholder="Vencimento (dia)" className="bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-indigo-500" />
       </div>
+      <p className="text-[10px] text-slate-600">Editar valor afeta apenas este mês</p>
       <div className="flex gap-2">
         <button onClick={salvar} className="flex-1 flex items-center justify-center gap-1 bg-indigo-600 text-white text-xs py-1.5 rounded-lg"><Check size={12} /> Salvar</button>
         <button onClick={cancelar} className="flex-1 flex items-center justify-center gap-1 bg-slate-800 text-slate-400 text-xs py-1.5 rounded-lg"><X size={12} /> Cancelar</button>
       </div>
     </div>
   )
+
+  const temOverride = gasto.valorMeses?.[mesAtivo] !== undefined
 
   return (
     <div className={cn('flex items-center gap-3 bg-slate-900 rounded-xl px-4 py-3 border border-slate-800 transition-colors', isPago && 'opacity-50')}>
@@ -381,9 +448,9 @@ function GastoItem({ gasto, isPago, onToggle, onRemove, onUpdate }: {
           {gasto.recorrente && <RefreshCw size={10} className="text-slate-600 shrink-0" />}
         </div>
         {gasto.vencimento && <p className="text-xs text-slate-500">vence dia {gasto.vencimento}</p>}
+        {temOverride && <p className="text-[10px] text-amber-600">valor deste mês</p>}
       </div>
-      <p className="text-sm font-semibold text-slate-300 shrink-0">{formatBRL(gasto.valor)}</p>
-      {/* Lápis sempre visível — mobile first */}
+      <p className="text-sm font-semibold text-slate-300 shrink-0">{formatBRL(valorEfetivo)}</p>
       <button onClick={() => setEditando(true)} className="shrink-0 text-slate-500 hover:text-indigo-400 active:text-indigo-400 transition-colors p-1">
         <Pencil size={15} />
       </button>
