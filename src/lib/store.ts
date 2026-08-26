@@ -4,7 +4,12 @@ import { getUsername } from './auth'
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
-export type Categoria = 'contas_casa' | 'cartao' | 'comida' | 'outros' | 'dividas'
+export type Categoria = 'contas_casa' | 'cartao' | 'comida' | 'restaurante' | 'inscricoes' | 'outros' | 'dividas'
+
+export interface Budget {
+  tipo: 'fixo' | 'percentual'  // valor em BRL ou % da receita do mês
+  valor: number
+}
 
 export interface Gasto {
   id: string
@@ -64,6 +69,7 @@ interface AppState {
   tarefas: Tarefa[]
   todos: Todo[]
   notas: Nota[]
+  budgets: Record<string, Budget>
   seeded: boolean
 
   addGasto: (g: Omit<Gasto, 'id'>) => void
@@ -88,6 +94,9 @@ interface AppState {
   addNota: (n: Omit<Nota, 'id' | 'atualizadaEm'>) => void
   updateNota: (id: string, n: Partial<Nota>) => void
   removeNota: (id: string) => void
+
+  setBudget: (categoria: string, budget: Budget) => void
+  removeBudget: (categoria: string) => void
 
   seedJaozincosta: () => void
 }
@@ -123,6 +132,7 @@ export const useStore = create<AppState>()(
       tarefas: [],
       todos: [],
       notas: [],
+      budgets: {},
       seeded: false,
 
       seedJaozincosta: () => set((s) => {
@@ -162,6 +172,12 @@ export const useStore = create<AppState>()(
       addNota: (n) => set((s) => ({ notas: [...s.notas, { ...n, id: uid(), atualizadaEm: now() }] })),
       updateNota: (id, n) => set((s) => ({ notas: s.notas.map((x) => x.id === id ? { ...x, ...n, atualizadaEm: now() } : x) })),
       removeNota: (id) => set((s) => ({ notas: s.notas.filter((x) => x.id !== id) })),
+
+      setBudget: (categoria, budget) => set((s) => ({ budgets: { ...s.budgets, [categoria]: budget } })),
+      removeBudget: (categoria) => set((s) => {
+        const { [categoria]: _, ...rest } = s.budgets
+        return { budgets: rest }
+      }),
     }),
     { name: `dashboard-data-v3-${getUsername()}` }
   )

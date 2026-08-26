@@ -1,6 +1,6 @@
 'use client'
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { useStore, Gasto, Receita, Categoria } from '@/lib/store'
+import { useStore, Gasto, Receita, Categoria, Budget } from '@/lib/store'
 import { formatBRL, CATEGORIAS } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { Plus, Trash2, CheckCircle, Circle, Pencil, Check, X, FileText, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react'
@@ -25,7 +25,7 @@ function getMeses() {
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export default function Financas() {
-  const { gastos, receitas, addGasto, removeGasto, togglePago, updateGasto, updateReceita, addReceita, removeReceita } = useStore()
+  const { gastos, receitas, addGasto, removeGasto, togglePago, updateGasto, updateReceita, addReceita, removeReceita, budgets, setBudget, removeBudget } = useStore()
   const mesAtualKey = format(new Date(), 'yyyy-MM')
   const [mesAtivo, setMesAtivo] = useState(mesAtualKey)
   const [catAtiva, setCatAtiva] = useState<Categoria>('contas_casa')
@@ -219,18 +219,33 @@ export default function Financas() {
         <div className="space-y-2">
           {CATS.map(([cat, { label, cor }]) => {
             const total = totalCat(cat)
-            const pct = totalGastos > 0 ? (total / totalGastos) * 100 : 0
+            const pctDoTotal = totalGastos > 0 ? (total / totalGastos) * 100 : 0
+            const budget = budgets[cat]
+            const budgetValor = budget
+              ? budget.tipo === 'percentual' ? (totalReceitas * budget.valor) / 100 : budget.valor
+              : null
+            const pctBudget = budgetValor && budgetValor > 0 ? Math.min((total / budgetValor) * 100, 100) : null
+            const overBudget = budgetValor !== null && total > budgetValor
+            const nearBudget = pctBudget !== null && pctBudget >= 75 && !overBudget
+            const barColor = overBudget ? 'bg-red-500' : nearBudget ? 'bg-amber-500' : 'bg-indigo-500'
             return (
-              <div key={cat} className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
-                <div className="flex justify-between items-center mb-1.5">
-                  <span className={cn('text-xs px-2 py-0.5 rounded-full border', cor)}>{label}</span>
-                  <span className="text-sm font-semibold text-slate-200">{formatBRL(total)}</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-1">
-                  <div className="bg-indigo-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                </div>
-                <p className="text-xs text-slate-600 mt-1">{pct.toFixed(0)}% do total de gastos</p>
-              </div>
+              <CategoryBudgetCard
+                key={cat}
+                cat={cat}
+                label={label}
+                cor={cor}
+                total={total}
+                pctDoTotal={pctDoTotal}
+                budget={budget}
+                budgetValor={budgetValor}
+                pctBudget={pctBudget}
+                overBudget={overBudget}
+                nearBudget={nearBudget}
+                barColor={barColor}
+                totalReceitas={totalReceitas}
+                onSetBudget={(b) => setBudget(cat, b)}
+                onRemoveBudget={() => removeBudget(cat)}
+              />
             )
           })}
         </div>
@@ -457,6 +472,109 @@ function GastoItem({ gasto, mesAtivo, isPago, onToggle, onRemove, onUpdate }: {
       <button onClick={() => onRemove(gasto.id)} className="shrink-0 text-slate-600 hover:text-red-400 active:text-red-400 transition-colors p-1">
         <Trash2 size={15} />
       </button>
+    </div>
+  )
+}
+
+// ─── CategoryBudgetCard ───────────────────────────────────────────────────────
+
+function CategoryBudgetCard({
+  cat, label, cor, total, pctDoTotal, budget, budgetValor, pctBudget,
+  overBudget, nearBudget, barColor, totalReceitas, onSetBudget, onRemoveBudget,
+}: {
+  cat: string; label: string; cor: string
+  total: number; pctDoTotal: number
+  budget: Budget | undefined; budgetValor: number | null; pctBudget: number | null
+  overBudget: boolean; nearBudget: boolean; barColor: string
+  totalReceitas: number
+  onSetBudget: (b: Budget) => void; onRemoveBudget: () => void
+}) {
+  const [editBudget, setEditBudget] = useState(false)
+  const [tipo, setTipo] = useState<'fixo' | 'percentual'>(budget?.tipo ?? 'percentual')
+  const [valor, setValor] = useState(budget ? String(budget.valor) : '')
+
+  function salvarBudget() {
+    const v = parseFloat(valor.replace(',', '.'))
+    if (isNaN(v) || v <= 0) return
+    onSetBudget({ tipo, valor: v })
+    setEditBudget(false)
+  }
+  function abrirEdit() {
+    setTipo(budget?.tipo ?? 'percentual')
+    setValor(budget ? String(budget.valor) : '')
+    setEditBudget(true)
+  }
+
+  return (
+    <div className={cn('bg-slate-900 border rounded-xl px-4 py-3', overBudget ? 'border-red-500/40' : nearBudget ? 'border-amber-500/30' : 'border-slate-800')}>
+      <div className="flex justify-between items-center mb-1.5">
+        <span className={cn('text-xs px-2 py-0.5 rounded-full border', cor)}>{label}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-200">{formatBRL(total)}</span>
+          <button onClick={abrirEdit} className="text-slate-600 hover:text-indigo-400 active:text-indigo-400 transition-colors" title="Definir orçamento">
+            <Pencil size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* Barra de progresso */}
+      <div className="w-full bg-slate-800 rounded-full h-1.5">
+        <div
+          className={cn('h-1.5 rounded-full transition-all', barColor)}
+          style={{ width: `${budgetValor !== null ? pctBudget ?? 0 : pctDoTotal}%` }}
+        />
+      </div>
+
+      {/* Legenda abaixo da barra */}
+      {budgetValor !== null ? (
+        <div className="flex justify-between items-center mt-1">
+          <p className={cn('text-xs', overBudget ? 'text-red-400 font-medium' : nearBudget ? 'text-amber-400' : 'text-slate-600')}>
+            {overBudget ? `Acima em ${formatBRL(total - budgetValor)}` : `Restam ${formatBRL(budgetValor - total)}`}
+          </p>
+          <p className="text-xs text-slate-600">
+            limite {budget?.tipo === 'percentual' ? `${budget.valor}% da renda` : formatBRL(budgetValor)}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-600 mt-1">{pctDoTotal.toFixed(0)}% do total de gastos</p>
+      )}
+
+      {/* Inline budget editor */}
+      {editBudget && (
+        <div className="mt-3 pt-3 border-t border-slate-800 space-y-2">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setTipo('percentual')}
+              className={cn('flex-1 text-xs py-1.5 rounded-lg border transition-colors', tipo === 'percentual' ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'border-slate-700 text-slate-500')}
+            >% da renda</button>
+            <button
+              onClick={() => setTipo('fixo')}
+              className={cn('flex-1 text-xs py-1.5 rounded-lg border transition-colors', tipo === 'fixo' ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'border-slate-700 text-slate-500')}
+            >Valor fixo</button>
+          </div>
+          <div className="flex gap-2 items-center">
+            <input
+              value={valor}
+              onChange={(e) => setValor(e.target.value)}
+              inputMode="decimal"
+              placeholder={tipo === 'percentual' ? 'ex: 3 (= 3%)' : 'ex: 500'}
+              className="flex-1 bg-slate-800 text-sm text-slate-100 px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-indigo-500"
+            />
+            {tipo === 'percentual' && totalReceitas > 0 && (
+              <span className="text-xs text-slate-500 shrink-0">
+                = {formatBRL((totalReceitas * (parseFloat(valor.replace(',', '.')) || 0)) / 100)}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={salvarBudget} className="flex-1 bg-indigo-600 text-white text-xs py-1.5 rounded-lg">Salvar</button>
+            {budget && (
+              <button onClick={() => { onRemoveBudget(); setEditBudget(false) }} className="px-3 bg-slate-800 text-red-400 text-xs py-1.5 rounded-lg">Remover</button>
+            )}
+            <button onClick={() => setEditBudget(false)} className="flex-1 bg-slate-800 text-slate-400 text-xs py-1.5 rounded-lg">Cancelar</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
