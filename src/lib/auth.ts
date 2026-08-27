@@ -3,6 +3,7 @@ const SALT = 'meu-dashboard-v1-salt-2026'
 const ITERATIONS = 200_000
 const SESSION_KEY = 'dashboard-session-v1'
 const SESSION_USER_KEY = 'dashboard-user-v1'
+const SESSION_TOKEN_KEY = 'dashboard-token-v1'
 
 const USERS: Record<string, string> = {
   jaozincosta: 'a4148a02cdf1d9e06008a00a86e6626bd6509dc50fda3476e0b9827300df288f',
@@ -36,8 +37,10 @@ export async function login(username: string, password: string): Promise<boolean
   if (!timingSafeEqual(hash, expectedHash)) return false
   sessionStorage.setItem(SESSION_KEY, '1')
   sessionStorage.setItem(SESSION_USER_KEY, u)
+  sessionStorage.setItem(SESSION_TOKEN_KEY, hash)
   return true
 }
+
 
 export function isAuthenticated(): boolean {
   try { return sessionStorage.getItem(SESSION_KEY) === '1' } catch { return false }
@@ -47,7 +50,12 @@ export function getUsername(): string {
   try { return sessionStorage.getItem(SESSION_USER_KEY) ?? '' } catch { return '' }
 }
 
+export function getToken(): string {
+  try { return sessionStorage.getItem(SESSION_TOKEN_KEY) ?? '' } catch { return '' }
+}
+
 export function logout(): void {
   sessionStorage.removeItem(SESSION_KEY)
   sessionStorage.removeItem(SESSION_USER_KEY)
+  sessionStorage.removeItem(SESSION_TOKEN_KEY)
 }

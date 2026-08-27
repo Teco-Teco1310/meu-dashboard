@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Financas from '@/components/Financas'
 import Trabalho from '@/components/Trabalho'
 import Login from '@/components/Login'
@@ -7,29 +7,55 @@ import { BarChart2, Briefcase, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isAuthenticated, logout, getUsername } from '@/lib/auth'
 import { useStore } from '@/lib/store'
+import { fetchServerData, pushServerData } from '@/lib/sync'
 
 type Modulo = 'financas' | 'trabalho'
 
 export default function Home() {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [modulo, setModulo] = useState<Modulo>('financas')
-  const { seeded, seedJaozincosta } = useStore()
+  const [syncing, setSyncing] = useState(false)
+  const { seeded, seedJaozincosta, gastos, receitas, tarefas, todos, notas, budgets } = useStore((s) => s)
+  const store = useStore
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const initialSyncDone = useRef(false)
 
   useEffect(() => {
     setAuthed(isAuthenticated())
   }, [])
 
-  // Seed default data for jaozincosta on first login
+  // Load from server on login
   useEffect(() => {
-    if (authed && getUsername() === 'jaozincosta' && !seeded) {
-      seedJaozincosta()
-    }
+    if (!authed || initialSyncDone.current) return
+    initialSyncDone.current = true
+
+    setSyncing(true)
+    fetchServerData().then((serverData) => {
+      if (serverData && typeof serverData === 'object' && 'gastos' in serverData) {
+        // Server has data → use it (overrides local)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        store.setState(serverData as any)
+      } else if (getUsername() === 'jaozincosta' && !seeded) {
+        // First time jaozincosta, no server data yet → seed defaults
+        seedJaozincosta()
+      }
+      setSyncing(false)
+    })
   }, [authed, seeded, seedJaozincosta])
+
+  // Debounced push to server whenever data changes
+  useEffect(() => {
+    if (!authed || !initialSyncDone.current) return
+    clearTimeout(pushTimer.current)
+    pushTimer.current = setTimeout(() => {
+      pushServerData({ gastos, receitas, tarefas, todos, notas, budgets, seeded })
+    }, 1500)
+    return () => clearTimeout(pushTimer.current)
+  }, [authed, gastos, receitas, tarefas, todos, notas, budgets, seeded])
 
   if (authed === null) return null
 
   if (!authed) {
-    // Reload after login so store reinitializes with the correct user-specific storage key
     return <Login onSuccess={() => window.location.reload()} />
   }
 
@@ -46,7 +72,12 @@ export default function Home() {
       <header className="sticky top-0 z-50 bg-slate-950/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
         <div>
           <h1 className="text-sm font-semibold text-slate-400 tracking-widest uppercase">Dashboard</h1>
-          {username && <p className="text-[10px] text-slate-600 mt-0.5">@{username}</p>}
+          {username && (
+            <p className="text-[10px] mt-0.5 flex items-center gap-1">
+              <span className="text-slate-600">@{username}</span>
+              {syncing && <span className="text-indigo-500 animate-pulse">· sincronizando…</span>}
+            </p>
+          )}
         </div>
         <button onClick={handleLogout} className="text-slate-600 hover:text-slate-400 transition-colors" title="Sair">
           <LogOut size={16} />
