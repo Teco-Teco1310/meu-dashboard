@@ -1,9 +1,11 @@
 import { Redis } from '@upstash/redis'
 import { NextRequest, NextResponse } from 'next/server'
 
-const USERS: Record<string, string> = {
-  jaozincosta: 'a4148a02cdf1d9e06008a00a86e6626bd6509dc50fda3476e0b9827300df288f',
-  mandyy:      'd3cc6dc644453fd5f83ae6f28da55d0f4e59523292ef7948c365b01052b1012a',
+function getUsers(): Record<string, string> {
+  return {
+    jaozincosta: process.env.USER_HASH_JAOZINCOSTA ?? '',
+    mandyy:      process.env.USER_HASH_MANDYY ?? '',
+  }
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -23,7 +25,7 @@ function getRedis() {
 export async function GET(req: NextRequest) {
   const u = req.nextUrl.searchParams.get('u') ?? ''
   const token = req.nextUrl.searchParams.get('token') ?? ''
-  const expected = USERS[u]
+  const expected = getUsers()[u]
   if (!expected || !timingSafeEqual(token, expected)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -40,7 +42,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const { username, token, data } = body
-    const expected = USERS[username]
+    const expected = getUsers()[username]
     if (!expected || !timingSafeEqual(token ?? '', expected)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
