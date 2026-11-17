@@ -1,29 +1,39 @@
 import { getUsername, getToken } from './auth'
 
-export async function fetchServerData(): Promise<Record<string, unknown> | null> {
+export type FetchResult =
+  | { ok: true; data: Record<string, unknown> | null }
+  | { ok: false; unauthorized: boolean }
+
+function authHeader(): string | null {
   const u = getUsername()
   const token = getToken()
-  if (!u || !token) return null
+  return u && token ? `Bearer ${u}:${token}` : null
+}
+
+export async function fetchServerData(): Promise<FetchResult> {
+  const auth = authHeader()
+  if (!auth) return { ok: false, unauthorized: true }
   try {
-    const res = await fetch(`/api/sync?u=${encodeURIComponent(u)}&token=${encodeURIComponent(token)}`)
-    if (!res.ok) return null
-    return await res.json()
+    const res = await fetch('/api/sync', { headers: { Authorization: auth }, cache: 'no-store' })
+    if (!res.ok) return { ok: false, unauthorized: res.status === 401 }
+    const data = await res.json()
+    return { ok: true, data: data && typeof data === 'object' ? data : null }
   } catch {
-    return null
+    return { ok: false, unauthorized: false }
   }
 }
 
-export async function pushServerData(data: Record<string, unknown>): Promise<void> {
-  const username = getUsername()
-  const token = getToken()
-  if (!username || !token) return
+export async function pushServerData(data: Record<string, unknown>): Promise<boolean> {
+  const auth = authHeader()
+  if (!auth) return false
   try {
-    await fetch('/api/sync', {
+    const res = await fetch('/api/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, token, data }),
+      headers: { 'Content-Type': 'application/json', Authorization: auth },
+      body: JSON.stringify({ data }),
     })
+    return res.ok
   } catch {
-    // silently fail — local data is still intact
+    return false
   }
 }
