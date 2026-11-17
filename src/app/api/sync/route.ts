@@ -1,55 +1,65 @@
 import { Redis } from '@upstash/redis'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
+import { authenticate } from '@/lib/server-auth'
 
-function getUsers(): Record<string, string> {
-  return {
-    jaozincosta: process.env.USER_HASH_JAOZINCOSTA ?? '',
-    mandyy:      process.env.USER_HASH_MANDYY ?? '',
-  }
+const LIST_KEYS = ['gastos', 'receitas', 'tarefas', 'todos', 'notas'] as const
+
+function getRedis(): Redis | null {
+  const url = process.env.KV_REST_API_URL
+  const token = process.env.KV_REST_API_TOKEN
+  return url && token ? new Redis({ url, token }) : null
 }
 
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let diff = 0
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  return diff === 0
+function isEmptyData(d: Record<string, unknown>): boolean {
+  const listsEmpty = LIST_KEYS.every((k) => !Array.isArray(d[k]) || d[k].length === 0)
+  const budgets = d.budgets
+  const budgetsEmpty = !budgets || typeof budgets !== 'object' || Object.keys(budgets).length === 0
+  return listsEmpty && budgetsEmpty
 }
 
-function getRedis() {
-  return new Redis({
-    url: process.env.KV_REST_API_URL!,
-    token: process.env.KV_REST_API_TOKEN!,
-  })
-}
-
-export async function GET(req: NextRequest) {
-  const u = req.nextUrl.searchParams.get('u') ?? ''
-  const token = req.nextUrl.searchParams.get('token') ?? ''
-  const expected = getUsers()[u]
-  if (!expected || !timingSafeEqual(token, expected)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+export async function GET(req: Request) {
+  const username = authenticate(req)
+  if (!username) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const redis = getRedis()
+  if (!redis) return NextResponse.json({ error: 'Sync not configured' }, { status: 503 })
   try {
-    const redis = getRedis()
-    const data = await redis.get(`data:${u}`)
-    return NextResponse.json(data ?? null)
+    const data = await redis.get(`data:${username}`)
+    return NextResponse.json(data ?? null, { headers: { 'Cache-Control': 'no-store' } })
   } catch {
-    return NextResponse.json(null)
+    // Never answer "no data" when we simply couldn't read it: the client
+    // would treat that as an empty account and could overwrite real data.
+    return NextResponse.json({ error: 'Storage unavailable' }, { status: 503 })
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
+  const username = authenticate(req)
+  if (!username) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const redis = getRedis()
+  if (!redis) return NextResponse.json({ error: 'Sync not configured' }, { status: 503 })
+
+  let data: unknown
   try {
-    const body = await req.json()
-    const { username, token, data } = body
-    const expected = getUsers()[username]
-    if (!expected || !timingSafeEqual(token ?? '', expected)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    data = (await req.json())?.data
+  } catch {
+    return NextResponse.json({ error: 'Bad request' }, { status: 400 })
+  }
+  if (!data || typeof data !== 'object' || !Array.isArray((data as Record<string, unknown>).gastos)) {
+    return NextResponse.json({ error: 'Bad request' }, { status: 400 })
+  }
+
+  try {
+    const key = `data:${username}`
+    // Safety net: refuse to replace existing data with a completely empty state.
+    if (isEmptyData(data as Record<string, unknown>)) {
+      const current = await redis.get<Record<string, unknown>>(key)
+      if (current && typeof current === 'object' && !isEmptyData(current)) {
+        return NextResponse.json({ error: 'Refusing to overwrite data with empty state' }, { status: 409 })
+      }
     }
-    const redis = getRedis()
-    await redis.set(`data:${username}`, data)
+    await redis.set(key, data)
     return NextResponse.json({ ok: true })
   } catch {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Storage unavailable' }, { status: 503 })
   }
 }
